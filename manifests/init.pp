@@ -10,21 +10,21 @@
 #
 class cust_haproxy {
   class { 'haproxy':
-    enable           => true,
     global_options   => {
-      'log'     => "${::ipaddress} local0",
       'chroot'  => '/var/lib/haproxy',
       'pidfile' => '/var/run/haproxy.pid',
       'maxconn' => '4000',
       'user'    => 'haproxy',
       'group'   => 'haproxy',
       'daemon'  => '',
-      'stats'   => 'socket /var/lib/haproxy/stats',
     },
     defaults_options => {
       'log'     => 'global',
-      'stats'   => 'enable',
-      'option'  => 'redispatch',
+      'option'  => [
+        'http-server-close',
+        'redispatch',
+        'dontlognull',
+      ],
       'retries' => '3',
       'timeout' => [
         'http-request 10s',
@@ -37,15 +37,57 @@ class cust_haproxy {
       'maxconn' => '8000',
     },
   }
-  haproxy::listen { 'stats':
+
+  haproxy::listen { 'statistics':
     ipaddress => '*',
-    ports     => '9090',
+    ports => '8080',
+    mode => 'http',
     options   => {
-      'mode'  => 'http',
       'stats' => [
+        'enable',
+        'refresh 30s',
         'uri /',
-        'auth puppet:puppet'
+        'show-node',
+        'show-legends',
+        'hide-version',
+        'auth puppet:puppet',
       ],
+    }
+  }
+
+  haproxy::frontend { 'HTTP-FRONT':
+    ports => '80',
+    mode => 'tcp',
+    options => {
+      'compression' => [
+        'algo gzip',
+        'type text/html text/plain text/javascript application/javascript application/xml text/css',
+      ],
+      'acl' => 'webhosting hdr_end(host) -i -f /etc/haproxy/url_webhosting',
+      'use_backend' => 'WEBHOSTING if webhosting',      
+    }
+  }
+
+  haproxy::backend { 'WEBHOSTING':
+    options => {
+      'balance' => 'roundrobin',
+      'cookie' => 'JSESSIONID prefix',
+      'compression' => [
+        'algo gzip',
+        'type text/html text/plain text/javascript application/javascript application/xml text/css'
+      ],
+      'server' => [
+        'SRV-WEB01 10.37.129.6:80 cookie A check',
+        'SRV-WEB02 10.37.129.7:80 cookie A check',
+      ]
     },
   }
+
+  file { '/etc/haproxy/url_webhosting':
+    ensure => 'file',
+    owner  => 'root',
+    group  => 'root',
+    mode   => '0644',
+    source => 'puppet:///modules/cust_haproxy/url_webhosting',
+  }         
 }
